@@ -542,12 +542,6 @@ class BotClient {
                     }
                 }
             })
-            
-            $("#botPlayersList").text("");
-            Object.values(this.players).forEach(plr => {
-                if (!this.ids.includes(plr.id))
-                    $("#botPlayersList").append(`<p>${plr.name}</p>`);
-            })
         }, 0)
     }
 }
@@ -586,7 +580,7 @@ class MainHack {
                     this.GUI.createToggle("Flush Players List on Death", "bot.flPlayers");
                 })
                 this.GUI.createSection("Misc", () => {
-                    this.GUI.createLabel("Waiting for player data...");
+                    this.GUI.createLabel("Nothing here yet! 😹");
                 }, {
                     id: "botPlayersList"
                 })
