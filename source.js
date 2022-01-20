@@ -440,7 +440,7 @@ class BotClient {
             this.GUI.createEvent(reason, "error");
         });
         client.socket.on("player", plr => {
-            if (plr) this.players[plr.id] = plr;
+            if (plr && client.memory.isAlive) this.players[plr.id] = plr;
         })
         client.socket.on("me", plr => {
             if (client.memory.isAlive && plr) {
@@ -450,19 +450,21 @@ class BotClient {
             }
         })
         client.socket.on("playerDied", (victim, attacker) => {
+            delete this.players[victim];
+            // Prevent double-logging.
             if (this.mem.loggedIDS.includes(victim) || this.ids.includes(victim))
                 return;
             this.mem.loggedIDS.push(victim);
             let str = this.ids.includes(attacker.killedBy.id) ? [`client "${attacker.killedBy.name}"`, "success"] : [`"${attacker.killedBy.name}"`, "normal"];
             this.GUI.createEvent(`"${this.players[victim].name}" died to ${str[0]}`, str[1]);
-            delete this.players[victim];
         })
         client.socket.on("playerLeave", plrId => {
+            delete this.players[plrId];
+            // Prevent double-logging.
             if (this.mem.loggedIDS.includes(plrId))
                 return;
             this.mem.loggedIDS.push(plrId);
             this.GUI.createEvent(`"${this.players[plrId].name}" left the server`, "error");
-            delete this.players[plrId];
         })
         client.socket.on("dealHit", plrId => {
             // this.GUI.createEvent(`${client.me.name} dealt damage to ${this.players[plrId].name}`, "normal", 500);
@@ -479,9 +481,8 @@ class BotClient {
     }
     // There is a need to return keys as they contain the ids. (Don't use Object.values)
     getValidPlayers() {
-        return Object.keys(this.players).filter(player => this.players[player].health > 0 && !this.ids.includes(this.players[player].id));
+        return Object.keys(this.players).filter(id => this.players[id].health > 0 && !this.ids.includes(id));
     }
-    // Returns a ID
     locatePlayer() {
         let validPlayers = this.getValidPlayers();
         return validPlayers.length > 0 ? validPlayers[Math.floor(Math.random() * validPlayers.length)] : false;
@@ -502,8 +503,10 @@ class BotClient {
             this.addListeners(this.AIs[this.AIs.length - 1]);
             this.AIs[this.AIs.length - 1].socket.emit("go", this.GUI.config["bot.name"] || "monkeware", captcha);
             this.GUI.createEvent(`Client "${this.GUI.config["bot.name"] || "monkeware"}" joined (${i} / ${max})`, "success");
-            if (!this.mem.hasAttachedLoop) this.clientLogic();
+            if (!this.GUI.config["bot.ss"]) this.clientLogic();
         }
+        if (this.GUI.config["bot.ss"])
+            this.clientLogic();
     }
     isKeyInvalid(targetKey) {
         let validPlayers = this.getValidPlayers();
@@ -513,35 +516,39 @@ class BotClient {
         return false;
     }
     clientLogic() {
+        if (this.mem.hasAttachedLoop)
+            return;
+        this.mem.hasAttachedLoop = true;
         setInterval(()=>{
             if (this.isKeyInvalid(this.mem.targetKey)) {
                 this.mem.targetKey = this.locatePlayer();
                 this.GUI.createEvent(`Clients are now targeting "${this.players[this.mem.targetKey].name}"`, "success");
-            }  
-            this.mem.target = this.players[this.mem.targetKey];
-            const ME_VALID = (m) => m.me && m.socket && m.me.pos && m.memory.isAlive;
-            const PLR_VALID = (p) => p.health > 0 && p.pos; 
-            this.AIs.forEach(client => {
-                let target = this.mem.target;
-                if (!target)
-                    return;
-                if (ME_VALID(client) && PLR_VALID(target)) {
-                    const POINT_DIST = (x1, y1, x2, y2) => Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
-                    let moveKeys = {
-                        left: target.pos.x < client.me.pos.x,
-                        up: target.pos.y < client.me.pos.y,
-                        right: target.pos.x > client.me.pos.x,
-                        down: target.pos.y > client.me.pos.y
+            } else {
+                this.mem.target = this.players[this.mem.targetKey];
+                const ME_VALID = (m) => m.me && m.socket && m.me.pos && m.memory.isAlive;
+                const PLR_VALID = (p) => p.health > 0 && p.pos; 
+                this.AIs.forEach(client => {
+                    let target = this.mem.target;
+                    if (!target)
+                        return;
+                    if (ME_VALID(client) && PLR_VALID(target)) {
+                        const POINT_DIST = (x1, y1, x2, y2) => Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+                        let moveKeys = {
+                            left: target.pos.x < client.me.pos.x,
+                            up: target.pos.y < client.me.pos.y,
+                            right: target.pos.x > client.me.pos.x,
+                            down: target.pos.y > client.me.pos.y
+                        }
+                        client.socket.emit("move", moveKeys);
+                        if (POINT_DIST(target.pos.x, target.pos.y, client.me.pos.x, client.me.pos.y) <= this.GUI.config["bot.range"]) {
+                            client.socket.emit("mouseDown", true);
+                            setTimeout(() => {
+                                client.socket.emit("mouseDown", false);
+                            })
+                        }
                     }
-                    client.socket.emit("move", moveKeys);
-                    if (POINT_DIST(target.pos.x, target.pos.y, client.me.pos.x, client.me.pos.y) <= this.GUI.config["bot.range"]) {
-                        client.socket.emit("mouseDown", true);
-                        setTimeout(() => {
-                            client.socket.emit("mouseDown", false);
-                        })
-                    }
-                }
-            })
+                })
+            }
         }, 0)
     }
 }
@@ -576,8 +583,9 @@ class MainHack {
                     this.GUI.createButton("Deploy", `${this.GUI.windowKey}.cheat.createBots()`);
                 });
                 this.GUI.createSection("Behavior", () => {
-                    this.GUI.createSlider("Filter Range", "bot.range", 100, 500, 10)
-                    this.GUI.createToggle("Flush Players List on Death", "bot.flPlayers");
+                    this.GUI.createSlider("Filter range", "bot.range", 100, 500, 10)
+                    this.GUI.createToggle("Reset players on death", "bot.flPlayers");
+                    this.GUI.createToggle("Sync spawn", "bot.ss");
                 })
                 this.GUI.createSection("Misc", () => {
                     this.GUI.createLabel("Nothing here yet! 😹");
