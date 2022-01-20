@@ -18,7 +18,7 @@ function hookCheat(url) {
         } else {
             setTimeout(() => waitJquery(), 50);
         }
-    }
+    };
     waitJquery();
 }
 
